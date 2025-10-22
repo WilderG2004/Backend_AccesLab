@@ -1,0 +1,15 @@
+# Entornos virtuales
+Backend_Laboratorio_env_311/
+venv/
+.venv/
+*/venv/ # Esto ignora cualquier venv dentro de subcarpetas (como AccesLab/)
+
+# Archivos y carpetas específicos de tu proyecto
+__pycache__/
+*.pyc
+
+# Archivos de base de datos local
+db.sqlite3
+
+# Configuraciones sensibles (si las tienes)
+.env
