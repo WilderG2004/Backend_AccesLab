@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------
 # --- CLASE DE UNIÓN (USUARIOS_ROLES) ---
 # -------------------------------------------------------------------
-# Esta clase está bien definida para una clave compuesta donde el Usuario_Id es la PK de Django.
 class Usuarios_Roles(models.Model):
     Usuario_Id = models.ForeignKey(
         'Usuarios', 
@@ -34,16 +33,16 @@ class Usuarios_Roles(models.Model):
         return f'Usuario {self.Usuario_Id.Usuario_Id} - Rol: {self.Rol_Id.Nombre_Roles}'
 
 
-# 🛑 MODELO DE ASOCIACIÓN PARA PROGRAMAS (CORREGIDO) 🛑
-# Solución: Marcar uno de los campos como primary_key=True para decirle a Django que
-# la PK es proporcionada y compuesta, evitando que busque el campo 'ID'
+# -------------------------------------------------------------------
+# --- MODELO DE ASOCIACIÓN PARA PROGRAMAS ---
+# -------------------------------------------------------------------
 class Usuarios_Programas(models.Model):
     Usuario_Id = models.ForeignKey(
         'Usuarios', 
         models.DO_NOTHING, 
         db_column='USUARIO_ID',
         related_name='programas_asociados',
-        primary_key=True # 👈 CORRECCIÓN CLAVE: Indica que la PK viene de aquí
+        primary_key=True
     )
     Programa_Id = models.ForeignKey(
         Programas, 
@@ -54,7 +53,6 @@ class Usuarios_Programas(models.Model):
     class Meta:
         managed = False
         db_table = 'USUARIOS_PROGRAMAS'
-        # unique_together garantiza que el par completo sea único (clave compuesta)
         unique_together = (('Usuario_Id', 'Programa_Id'),) 
         verbose_name = "Programa de Usuario (Oracle)"
         verbose_name_plural = "Programas de Usuarios (Oracle)"
@@ -62,8 +60,9 @@ class Usuarios_Programas(models.Model):
     def __str__(self):
         return f'Usuario {self.Usuario_Id.Usuario_Id} asociado al Programa {self.Programa_Id.Programa_Id}'
 
+
 # -------------------------------------------------------------------
-# --- CLASE DE PERFIL (USUARIOS) ---
+# --- CLASE DE PERFIL (USUARIOS) - ⭐ CAMPO CAMPUS AGREGADO ⭐ ---
 # -------------------------------------------------------------------
 class Usuarios(models.Model):
     Usuario_Id = models.OneToOneField(
@@ -92,7 +91,7 @@ class Usuarios(models.Model):
         related_name='usuarios_con_rol'
     )
     
-    Programas = models.ManyToManyField( # 🟢 Añadido el ManyToManyField para Usuarios_Programas
+    Programas = models.ManyToManyField(
         Programas,
         through=Usuarios_Programas,
         related_name='usuarios_en_programa'
@@ -105,6 +104,15 @@ class Usuarios(models.Model):
     Direccion = models.CharField(max_length=250, db_column='DIRECCION', null=True, blank=True)
     Telefono = models.DecimalField(max_digits=15, decimal_places=0, null=True, blank=True, db_column='TELEFONO')
     Numero_celular = models.DecimalField(max_digits=15, decimal_places=0, null=True, blank=True, db_column='NUMERO_CELULAR')
+    
+
+    Campus = models.CharField(
+        max_length=100, 
+        db_column='CAMPUS', 
+        null=True, 
+        blank=True,
+        help_text='Campus al que pertenece el usuario'
+    )
 
     class Meta:
         db_table = 'USUARIOS' 

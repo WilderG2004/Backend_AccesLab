@@ -15,6 +15,7 @@ class Roles(models.Model):
     def __str__(self):
         return self.Nombre_Roles
 
+
 class Frecuencia_Servicio(models.Model):
     Frecuencia_Servicio_Id = models.IntegerField(primary_key=True, db_column='FRECUENCIA_SERVICIO_ID')
     Nombre_Frecuencia_Servicio = models.CharField(max_length=80, db_column='NOMBRE_FRECUENCIA_SERVICIO')
@@ -26,10 +27,10 @@ class Frecuencia_Servicio(models.Model):
     def __str__(self):
         return self.Nombre_Frecuencia_Servicio
 
+
 class Entregas(models.Model):
     Entrega_Id = models.IntegerField(primary_key=True, db_column='ENTREGA_ID')
     Fecha_Entrega = models.DateField(db_column='FECHA_ENTREGA')
-    # Mapea TIMESTAMP(6) de Oracle
     Hora_Entrega = models.DateTimeField(db_column='HORA_ENTREGA') 
     Observacion_Entrega = models.CharField(max_length=600, db_column='OBSERVACION_ENTREGA')
     
@@ -46,10 +47,10 @@ class Entregas(models.Model):
     def __str__(self):
         return f'Entrega #{self.Entrega_Id}'
     
+
 class Devoluciones(models.Model):
     Devolucion_Id = models.IntegerField(primary_key=True, db_column='DEVOLUCION_ID')
     Fecha_Devolucion = models.DateField(db_column='FECHA_DEVOLUCION')
-    # Mapea TIMESTAMP(6) de Oracle
     Hora_Devolucion = models.DateTimeField(db_column='HORA_DEVOLUCION') 
     Observaciones_Devolucion = models.CharField(max_length=600, db_column='OBSERVACIONES_DEVOLUCION')
 
@@ -59,6 +60,7 @@ class Devoluciones(models.Model):
         
     def __str__(self):
         return f'Devolución #{self.Devolucion_Id}'
+
 
 class Tipo_Servicio(models.Model):
     Tipo_Servicio_Id = models.IntegerField(primary_key=True, db_column='TIPO_SERVICIO_ID')
@@ -71,16 +73,11 @@ class Tipo_Servicio(models.Model):
     def __str__(self):
         return self.Nombre_Tipo_Servicio
 
-# =======================================================
-# NUEVOS MODELOS DE LABORATORIO Y ESTADO
-# =======================================================
 
 class Laboratorios(models.Model):
-    # La PK es Integer, no AutoField, si ya está creada con IDENTITY o secuencia.
     Laboratorio_Id = models.IntegerField(primary_key=True, db_column='LABORATORIO_ID')
     Nombre_Laboratorio = models.CharField(db_column='NOMBRE_LABORATORIO', max_length=100)
     Capacidad = models.IntegerField(db_column='CAPACIDAD')
-    # Tu DDL usa VARCHAR2(250)
     Ubicacion = models.CharField(db_column='UBICACION', max_length=250) 
 
     class Meta:
@@ -90,15 +87,13 @@ class Laboratorios(models.Model):
     def __str__(self):
         return self.Nombre_Laboratorio
         
+
 class Horarios_Laboratorio(models.Model):
-    # Corregido el nombre de la clase a snake_case para consistencia con tu DDL
     Horario_Id = models.IntegerField(primary_key=True, db_column='HORARIO_ID')
     
-    # Clave Foránea a Laboratorios
     Laboratorio_Id = models.ForeignKey(Laboratorios, models.DO_NOTHING, db_column='LABORATORIO_ID') 
     
-    Dia_Semana = models.CharField(db_column='DIA_SEMANA', max_length=20) # DDL usa 20
-    # CORRECCIÓN: Si Oracle usa TIMESTAMP(6), debes usar DateTimeField, no TimeField
+    Dia_Semana = models.CharField(db_column='DIA_SEMANA', max_length=20)
     Hora_Inicio = models.DateTimeField(db_column='HORA_INICIO')
     Hora_Fin = models.DateTimeField(db_column='HORA_FIN')
 
@@ -109,12 +104,10 @@ class Horarios_Laboratorio(models.Model):
     def __str__(self):
         return f'Horario #{self.Horario_Id} - {self.Dia_Semana}'
         
+
 class Estados(models.Model):
     Estado_Id = models.IntegerField(primary_key=True, db_column='ESTADO_ID')
-    # Tu DDL usa VARCHAR2(50), no 80.
     Nombre_Estado = models.CharField(max_length=50, db_column='NOMBRE_ESTADO')
-    # DDL no tiene Descripcion. Se elimina si no existe en BD.
-    # Descripcion = models.CharField(max_length=250, db_column='DESCRIPCION', null=True, blank=True)
 
     class Meta:
         db_table = 'ESTADOS'
@@ -123,9 +116,6 @@ class Estados(models.Model):
     def __str__(self):
         return self.Nombre_Estado
 
-# =======================================================
-# OTROS MODELOS EXISTENTES
-# =======================================================
 
 class Tipo_Identificacion(models.Model):
     Tipo_Id = models.IntegerField(primary_key=True, db_column='TIPO_ID')
@@ -138,6 +128,7 @@ class Tipo_Identificacion(models.Model):
     def __str__(self):
         return self.Nombre_Tipo_Identificacion
 
+
 class Tipo_Solicitantes(models.Model):
     Solicitante_Id = models.IntegerField(primary_key=True, db_column='SOLICITANTE_ID')
     Nombre_Solicitante = models.CharField(max_length=80, db_column='NOMBRE_SOLICITANTE')
@@ -149,6 +140,7 @@ class Tipo_Solicitantes(models.Model):
     def __str__(self):
         return self.Nombre_Solicitante
 
+
 class Facultades(models.Model):
     Facultad_Id = models.IntegerField(primary_key=True, db_column='FACULTAD_ID')
     Nombre_Facultad = models.CharField(max_length=80, db_column='NOMBRE_FACULTAD')
@@ -159,6 +151,7 @@ class Facultades(models.Model):
 
     def __str__(self):
         return self.Nombre_Facultad
+
 
 class Programas(models.Model):
     Programa_Id = models.IntegerField(primary_key=True, db_column='PROGRAMA_ID')
@@ -176,6 +169,7 @@ class Programas(models.Model):
     def __str__(self):
         return self.Nombre_Programa
 
+
 class Categorias(models.Model):
     Categoria_Id = models.IntegerField(primary_key=True, db_column='CATEGORIA_ID')
     Nombre_Categoria = models.CharField(max_length=250, db_column='NOMBRE_CATEGORIA')
@@ -187,6 +181,8 @@ class Categorias(models.Model):
     def __str__(self):
         return self.Nombre_Categoria
 
+
+# ⭐⭐⭐ MODELO OBJETOS CON IMAGEN_URL Y ACTIVO ⭐⭐⭐
 class Objetos(models.Model):
     Objetos_Id = models.IntegerField(primary_key=True, db_column='OBJETOS_ID')
     Nombre_Objetos = models.CharField(max_length=80, db_column='NOMBRE_OBJETOS') 
@@ -197,11 +193,32 @@ class Objetos(models.Model):
         db_column='CATEGORIA_ID'
     )
     Descripcion = models.CharField(max_length=250, db_column='DESCRIPCION', null=True, blank=True)
-    Cant_Stock = models.IntegerField(db_column='CANT_STOCK', null=True, blank=True) 
+    Cant_Stock = models.IntegerField(db_column='CANT_STOCK', null=True, blank=True)
+    
+    # ⭐ NUEVO CAMPO: IMAGEN_URL ⭐
+    Imagen_Url = models.CharField(
+        max_length=500, 
+        db_column='IMAGEN_URL', 
+        null=True, 
+        blank=True,
+        help_text='URL de la imagen del objeto'
+    )
+    
+    # ⭐ NUEVO CAMPO: ACTIVO ⭐
+    Activo = models.BooleanField(
+        default=True,
+        db_column='ACTIVO',
+        help_text='Indica si el objeto está activo (disponible)'
+    )
 
     class Meta:
         db_table = 'OBJETOS'
         managed = False
 
     def __str__(self):
-        return self.Nombre_Objetos
+        return f"{self.Nombre_Objetos} (Stock: {self.Cant_Stock})"
+    
+    @property
+    def disponible(self):
+        """Verifica si hay stock disponible y está activo"""
+        return self.Cant_Stock > 0 and self.Activo
