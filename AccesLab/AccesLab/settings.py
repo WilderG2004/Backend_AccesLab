@@ -7,6 +7,7 @@ from datetime import timedelta
 import os
 import oracledb # Driver moderno
 
+
 # ----------------------------------------------------------------------
 # INICIALIZACIÓN DE ORACLE INSTANT CLIENT
 # ----------------------------------------------------------------------
@@ -44,11 +45,15 @@ INSTALLED_APPS = [
     'usuarios',
     'maestros',
     'reservas',
+    'django_extensions',
     'rest_framework_simplejwt', 
+    'corsheaders', 
+    'reportes',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -58,6 +63,41 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'AccesLab.urls'
+
+# -----------------------------------------------------------
+# === CONFIGURACIÓN DE CORS PARA FLUTTER WEB / EMULADOR ===
+# -----------------------------------------------------------
+
+# Opción 1: Temporalmente la más fácil (permite todo)
+CORS_ALLOW_ALL_ORIGINS = True
+
+# --- O ---
+
+# Opción 2: Más segura y recomendada. Descomenta y ajusta si no usas CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_ALL_ORIGINS = False
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:8080",
+#     "http://127.0.0.1:8000",
+#     # Si usas Flutter Web (el puerto cambia, pero 127.0.0.1 es constante):
+#     # Nota: Usar 'http://localhost' en lugar de 127.0.0.1 puede ayudar en algunos navegadores
+#     "http://localhost:50000",  # Puerto de ejemplo, ajusta si es necesario
+#     "http://127.0.0.1:50000",  # Puerto de ejemplo, ajusta si es necesario
+#     # Si usas Emulador Android:
+#     "http://10.0.2.2:8000",
+# ]
+
+# Para POST, necesitamos permitir Content-Type y Authorization (para tokens)
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 TEMPLATES = [
     {
@@ -145,3 +185,6 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

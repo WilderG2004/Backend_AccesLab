@@ -25,40 +25,74 @@ from usuarios.models import Usuarios, Usuarios_Programas
 
 
 # ----------------------------------------------------------------------
+# UTILIDAD: Generar ID automático si no existe la secuencia
+# ----------------------------------------------------------------------
+def get_next_id(model_class, id_field_name):
+    """
+    Obtiene el siguiente ID disponible para un modelo.
+    Intenta usar la secuencia de Oracle, si falla usa max(id) + 1
+    """
+    try:
+        # Intentar obtener el siguiente valor de la secuencia
+        sequence_name = f"C##_ACCESLAB_USER.{model_class.__name__.upper()}_SEQ"
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT {sequence_name}.NEXTVAL FROM DUAL")
+            return cursor.fetchone()[0]
+    except Exception:
+        # Si falla, usar max(id) + 1
+        max_id = model_class.objects.aggregate(
+            max_id=models.Max(id_field_name)
+        )['max_id'] or 0
+        return max_id + 1
+
+
+# ----------------------------------------------------------------------
 # 1. Serializers para SOLICITUDES_OBJETOS (Detalle de Objetos)
 # ----------------------------------------------------------------------
 
-# --- 1A. Serializer para el Detalle de Objetos Solicitados (ESCRITURA) ---
 class SolicitudesObjetosSerializer(serializers.ModelSerializer):
-    objetos_id = serializers.IntegerField(write_only=True)
+    objetos_id = serializers.IntegerField(write_only=True, required=False)
+    # Permitir crear objetos directamente
+    nombre_objeto = serializers.CharField(write_only=True, required=False)
+    descripcion_objeto = serializers.CharField(write_only=True, required=False)
     
     class Meta:
         model = Solicitudes_Objetos
-        fields = ('objetos_id', 'Cantidad_Objetos')
+        fields = ('objetos_id', 'nombre_objeto', 'descripcion_objeto', 'Cantidad_Objetos')
 
     def validate(self, data):
-        """Valida que el stock sea suficiente antes de procesar la solicitud."""
+        """Valida que el stock sea suficiente o crea el objeto si no existe."""
         objeto_id = data.get('objetos_id')
-        cantidad = data.get('Cantidad_Objetos')
+        nombre_objeto = data.get('nombre_objeto')
+        cantidad = data.get('Cantidad_Objetos', 0)
         
-        try:
-            objeto = Objetos.objects.get(Objetos_Id=objeto_id)
-        except Objetos.DoesNotExist:
-            raise serializers.ValidationError({"objetos_id": "El Objetos_Id proporcionado no existe en el catálogo."})
+        # Si no hay objeto_id pero hay nombre, se creará dinámicamente
+        if not objeto_id and not nombre_objeto:
+            raise serializers.ValidationError({
+                "objetos_id": "Debe proporcionar 'objetos_id' o 'nombre_objeto' para crear el objeto."
+            })
         
         if cantidad <= 0:
-            raise serializers.ValidationError({"Cantidad_Objetos": "La cantidad debe ser mayor a cero."})
+            raise serializers.ValidationError({
+                "Cantidad_Objetos": "La cantidad debe ser mayor a cero."
+            })
 
-        # Control de Stock
-        if objeto.Cant_Stock < cantidad:
-            raise serializers.ValidationError(
-                {"Cantidad_Objetos": f"El objeto '{objeto.Nombre_Objetos}' solo tiene {objeto.Cant_Stock} en stock, y se solicitan {cantidad}."}
-            )
+        # Si se proporciona objeto_id, validar stock
+        if objeto_id:
+            try:
+                objeto = Objetos.objects.get(Objetos_Id=objeto_id)
+                if objeto.Cant_Stock < cantidad:
+                    raise serializers.ValidationError({
+                        "Cantidad_Objetos": f"El objeto '{objeto.Nombre_Objetos}' solo tiene {objeto.Cant_Stock} en stock, y se solicitan {cantidad}."
+                    })
+            except Objetos.DoesNotExist:
+                raise serializers.ValidationError({
+                    "objetos_id": "El Objetos_Id proporcionado no existe. Use 'nombre_objeto' para crear uno nuevo."
+                })
         
         return data
 
 
-# --- 1B. Serializer para el Detalle de Objetos Solicitados (LECTURA) ---
 class SolicitudesObjetosReadSerializer(serializers.ModelSerializer):
     nombre_objeto = serializers.CharField(source='Objetos_Id.Nombre_Objetos', read_only=True)
     
@@ -71,150 +105,263 @@ class SolicitudesObjetosReadSerializer(serializers.ModelSerializer):
 # 2. Serializers para SOLICITUDES (Principal)
 # ----------------------------------------------------------------------
 
-# --- 2A. Serializer para la Solicitud Principal (ESCRITURA/ACTUALIZACIÓN) ---
 class SolicitudesWriteSerializer(serializers.ModelSerializer):
     # Detalle de objetos: Anidado y solo para escritura (CREATE)
     objetos_solicitados = SolicitudesObjetosSerializer(many=True, write_only=True, required=False) 
 
-    # Campos de FK que se envían como IDs (write_only)
-    tipo_servicio_id = serializers.IntegerField(write_only=True, required=False) 
+    # Campos de FK - Ahora OPCIONALES y con auto-creación
+    tipo_servicio_id = serializers.IntegerField(write_only=True, required=False)
+    tipo_servicio_nombre = serializers.CharField(write_only=True, required=False)
+    
     usuario_id = serializers.IntegerField(write_only=True, required=False)
     
-    # Campos de gestión (Permiten IDs de objetos FK)
-    Estado_Id = serializers.PrimaryKeyRelatedField(queryset=Estados.objects.all(), required=False, allow_null=True)
-    Laboratorio_Id = serializers.PrimaryKeyRelatedField(queryset=Laboratorios.objects.all(), required=False, allow_null=True)
-    Horario_Id = serializers.PrimaryKeyRelatedField(queryset=Horarios_Laboratorio.objects.all(), required=False, allow_null=True)
+    # Campos de gestión - OPCIONALES
+    estado_id = serializers.IntegerField(write_only=True, required=False)
+    estado_nombre = serializers.CharField(write_only=True, required=False)
+    
+    laboratorio_id = serializers.IntegerField(write_only=True, required=False)
+    laboratorio_nombre = serializers.CharField(write_only=True, required=False)
+    
+    horario_id = serializers.IntegerField(write_only=True, required=False)
     
     # Campos requeridos en la cabecera
-    Asignatura = serializers.CharField(required=True)
-    N_asistentes = serializers.IntegerField(required=True)
+    # 🔥 CORRECCIÓN: Hacerlos no requeridos por defecto para que PATCH funcione.
+    # La validación de 'create' se encargará de exigirlos.
+    Asignatura = serializers.CharField(required=False)
+    N_asistentes = serializers.IntegerField(required=False)
 
     class Meta:
         model = Solicitudes
         fields = (
-            'Solicitud_Id', 'usuario_id', 'tipo_servicio_id', 
+            'Solicitud_Id', 'usuario_id', 
+            'tipo_servicio_id', 'tipo_servicio_nombre',
+            'estado_id', 'estado_nombre',
+            'laboratorio_id', 'laboratorio_nombre',
+            'horario_id',
             'Asignatura', 'N_asistentes', 
-            # CAMPOS DE TIEMPO
             'Fecha_Inicio', 'Fecha_Fin', 'Hora_Inicio', 'Hora_Fin',
             'Observaciones_Solicitud',
-            # Campos de gestión
-            'Estado_Id', 'Laboratorio_Id', 'Horario_Id',
-            'objetos_solicitados' # Campo anidado
+            'objetos_solicitados',
+            'Fecha_solicitud' 
         )
-        read_only_fields = ('Solicitud_Id', 'Fecha_solicitud', 'Entrega_Id', 'Devolucion_Id')
+        read_only_fields = ('Solicitud_Id', 'Fecha_solicitud')
 
-    # --- MÉTODO DE VALIDACIÓN PRINCIPAL (DINÁMICO Y FLEXIBLE) ---
+    # ============================================
+    # 🔥🔥 INICIO DE LA CORRECCIÓN 🔥🔥
+    # ============================================
     def validate(self, data):
+        """Validación flexible que permite crear o referenciar entidades existentes."""
         
-        # 1. Obtener tipo_servicio_id y cargar el objeto dinámicamente
-        tipo_servicio_id = data.get('tipo_servicio_id')
-        if self.instance and tipo_servicio_id is None:
-            tipo_servicio_id = self.instance.Tipo_Servicio_Id_id
-        
-        if tipo_servicio_id is None:
-            raise serializers.ValidationError({'tipo_servicio_id': 'Tipo de servicio es obligatorio para la creación.'})
-        
-        try:
-            tipo_servicio_id = int(tipo_servicio_id)
-        except (ValueError, TypeError):
-            raise serializers.ValidationError({'tipo_servicio_id': 'El ID del tipo de servicio debe ser un número válido.'})
-        
-        # 🟢 CARGA DINÁMICA: Cargar el objeto Tipo_Servicio
-        try:
-            tipo_servicio_obj = Tipo_Servicio.objects.get(Tipo_Servicio_Id=tipo_servicio_id)
-            nombre_servicio = tipo_servicio_obj.Nombre_Tipo_Servicio.upper().strip() 
-        except Tipo_Servicio.DoesNotExist:
-            raise serializers.ValidationError({'tipo_servicio_id': 'El Tipo de Servicio seleccionado no existe.'})
-        
-        
-        # 2. Obtener Laboratorio y Horario (Lógica de PATCH/POST)
-        laboratorio_obj = data.get('Laboratorio_Id')
-        horario_obj = data.get('Horario_Id')
-        objetos_solicitados = data.get('objetos_solicitados')
-        
-        if self.instance:
-            laboratorio_id = laboratorio_obj.pk if laboratorio_obj is not None else self.instance.Laboratorio_Id_id
-            horario_id = horario_obj.pk if horario_obj is not None else self.instance.Horario_Id_id
-        else:
-            laboratorio_id = laboratorio_obj.pk if laboratorio_obj else None
-            horario_id = horario_obj.pk if horario_obj else None
-            
-        # ----------------------------------------------------------------------
-        # 🛑 NUEVA LÓGICA DE VALIDACIÓN FLEXIBLE 🛑
-        # Se requiere AL MENOS que se solicite un laboratorio/horario O que se pidan objetos.
-        # ----------------------------------------------------------------------
-        
-        # A. Chequeo de dependencia mínima
-        tiene_laboratorio_horario = laboratorio_id is not None and horario_id is not None
-        tiene_objetos = bool(objetos_solicitados)
-        
-        if not tiene_laboratorio_horario and not tiene_objetos:
-            raise serializers.ValidationError(
-                {'general': 'La solicitud debe incluir la asignación de un Laboratorio/Horario O el detalle de Objetos Solicitados, pero no ambos campos vacíos.'}
-            )
+        # self.instance es None en CREATE (POST)
+        # self.instance existe en UPDATE (PUT/PATCH)
+        is_update_or_patch = self.instance is not None
 
-        # B. Validación de Concurrencia (Solo si Laboratorio/Horario está presente)
-        if tiene_laboratorio_horario:
-            
-            # Revisa que las fechas y horas estén presentes si se asignó un laboratorio/horario.
-            fecha_inicio = data.get('Fecha_Inicio', self.instance.Fecha_Inicio if self.instance else None)
-            fecha_fin = data.get('Fecha_Fin', self.instance.Fecha_Fin if self.instance else None)
-            hora_inicio = data.get('Hora_Inicio', self.instance.Hora_Inicio if self.instance else None)
-            hora_fin = data.get('Hora_Fin', self.instance.Hora_Fin if self.instance else None)
-            
-            if not all([fecha_inicio, fecha_fin, hora_inicio, hora_fin]):
+        # Validar que al menos haya una forma de identificar el tipo de servicio
+        tipo_servicio_id = data.get('tipo_servicio_id')
+        tipo_servicio_nombre = data.get('tipo_servicio_nombre')
+        
+        if is_update_or_patch:
+            # Es un UPDATE/PATCH. Solo validamos si el campo viene en el request.
+            if 'tipo_servicio_id' not in data and 'tipo_servicio_nombre' not in data:
+                # El campo no se está actualizando, así que no lo validamos.
+                # Esto permite que un PATCH a {'Estado_Id': 2} funcione.
+                pass
+            elif not tipo_servicio_id and not tipo_servicio_nombre:
+                # El campo SÍ viene, pero viene vacío/nulo, lo cual es un error.
                 raise serializers.ValidationError({
-                    'Fecha_Inicio': 'Se requieren Fecha_Inicio, Fecha_Fin, Hora_Inicio y Hora_Fin si se asigna Laboratorio/Horario.'
+                    'tipo_servicio': 'Debe proporcionar tipo_servicio_id o tipo_servicio_nombre.'
+                })
+        else:
+            # Es un CREATE. La validación es obligatoria.
+            if not tipo_servicio_id and not tipo_servicio_nombre:
+                raise serializers.ValidationError({
+                    'tipo_servicio': 'Debe proporcionar tipo_servicio_id o tipo_servicio_nombre.'
                 })
             
-            # Buscar conflictos en estado PENDIENTE (1) o APROBADA (2)
+            # También validar los campos requeridos en CREATE
+            if not data.get('Asignatura'):
+                raise serializers.ValidationError({'Asignatura': 'Este campo es requerido.'})
+            if not data.get('N_asistentes'):
+                raise serializers.ValidationError({'N_asistentes': 'Este campo es requerido.'})
+
+        # ============================================
+        # 🔥🔥 FIN DE LA CORRECCIÓN 🔥🔥
+        # ============================================
+        
+        # Validar fechas si se proporcionan
+        fecha_inicio = data.get('Fecha_Inicio')
+        fecha_fin = data.get('Fecha_Fin')
+        
+        if fecha_inicio and fecha_fin and fecha_inicio > fecha_fin:
+            raise serializers.ValidationError({
+                'Fecha_Fin': 'La fecha de fin debe ser posterior a la fecha de inicio.'
+            })
+        
+        # Validación de concurrencia SOLO si hay laboratorio Y fechas completas
+        # Usar 'self.instance' para obtener el lab actual si no se está cambiando
+        laboratorio_id = data.get('laboratorio_id', getattr(self.instance, 'Laboratorio_Id_id', None))
+        
+        if laboratorio_id and all([data.get('Fecha_Inicio'), data.get('Fecha_Fin'), 
+                                   data.get('Hora_Inicio'), data.get('Hora_Fin')]):
+            
+            hora_inicio = data.get('Hora_Inicio')
+            hora_fin = data.get('Hora_Fin')
+            
+            # Asegurarse de que las fechas/horas sean objetos correctos para comparar
+            # (Depende de cómo lleguen los datos, si son strings, convertirlos a datetime)
+            
             conflictos = Solicitudes.objects.filter(
                 Laboratorio_Id=laboratorio_id,
                 Fecha_Inicio__lte=fecha_inicio, 
                 Fecha_Fin__gte=fecha_inicio, 
-                Estado_Id__Estado_Id__in=[1, 2] 
+                Estado_Id__Estado_Id__in=[1, 2] # 1=Pendiente, 2=Aprobada
             ).exclude(
-                Solicitud_Id=self.instance.Solicitud_Id if self.instance else None 
+                Solicitud_Id=self.instance.Solicitud_Id if self.instance else None
             ).filter(
                 Q(Hora_Inicio__lt=hora_fin) & Q(Hora_Fin__gt=hora_inicio)
             )
 
             if conflictos.exists():
                 raise serializers.ValidationError({
-                    "Laboratorio_Id": "El laboratorio ya está reservado o pendiente de aprobación en el horario y fecha solicitados. Conflicto encontrado."
+                    "laboratorio_id": "El laboratorio ya está reservado en el horario solicitado."
                 })
 
         return data
 
-    # --- MÉTODO CREATE ANIDADO (Transacción Atómica) ---
+    def _get_or_create_tipo_servicio(self, validated_data):
+        """Obtiene o crea el tipo de servicio."""
+        tipo_servicio_id = validated_data.pop('tipo_servicio_id', None)
+        tipo_servicio_nombre = validated_data.pop('tipo_servicio_nombre', None)
+        
+        if tipo_servicio_id:
+            try:
+                return Tipo_Servicio.objects.get(Tipo_Servicio_Id=tipo_servicio_id)
+            except Tipo_Servicio.DoesNotExist:
+                if not tipo_servicio_nombre:
+                    raise serializers.ValidationError({
+                        'tipo_servicio_id': f'No existe un tipo de servicio con ID {tipo_servicio_id}'
+                    })
+        
+        # Crear nuevo tipo de servicio
+        if tipo_servicio_nombre:
+            tipo_servicio, created = Tipo_Servicio.objects.get_or_create(
+                Nombre_Tipo_Servicio=tipo_servicio_nombre,
+                defaults={
+                    'Tipo_Servicio_Id': get_next_id(Tipo_Servicio, 'Tipo_Servicio_Id')
+                }
+            )
+            return tipo_servicio
+        
+        return None
+
+    def _get_or_create_estado(self, validated_data):
+        """Obtiene o crea el estado."""
+        estado_id = validated_data.pop('estado_id', None)
+        estado_nombre = validated_data.pop('estado_nombre', None)
+        
+        if estado_id:
+            try:
+                return Estados.objects.get(Estado_Id=estado_id)
+            except Estados.DoesNotExist:
+                if not estado_nombre:
+                    # Estado por defecto: PENDIENTE
+                    return Estados.objects.get(Estado_Id=1)
+        
+        if estado_nombre:
+            estado, created = Estados.objects.get_or_create(
+                Nombre_Estado=estado_nombre,
+                defaults={
+                    'Estado_Id': get_next_id(Estados, 'Estado_Id')
+                }
+            )
+            return estado
+        
+        # Estado por defecto
+        return Estados.objects.get(Estado_Id=1)
+
+    def _get_or_create_laboratorio(self, validated_data):
+        """Obtiene o crea el laboratorio."""
+        laboratorio_id = validated_data.pop('laboratorio_id', None)
+        laboratorio_nombre = validated_data.pop('laboratorio_nombre', None)
+        
+        if laboratorio_id:
+            try:
+                return Laboratorios.objects.get(Laboratorio_Id=laboratorio_id)
+            except Laboratorios.DoesNotExist:
+                if not laboratorio_nombre:
+                    return None
+        
+        if laboratorio_nombre:
+            laboratorio, created = Laboratorios.objects.get_or_create(
+                Nombre_Laboratorio=laboratorio_nombre,
+                defaults={
+                    'Laboratorio_Id': get_next_id(Laboratorios, 'Laboratorio_Id')
+                }
+            )
+            return laboratorio
+        
+        return None
+
+    def _get_or_create_horario(self, validated_data):
+        """Obtiene el horario si existe."""
+        horario_id = validated_data.pop('horario_id', None)
+        
+        if horario_id:
+            try:
+                return Horarios_Laboratorio.objects.get(Horario_Id=horario_id)
+            except Horarios_Laboratorio.DoesNotExist:
+                return None
+        
+        return None
+
+    def _get_or_create_objeto(self, objeto_data):
+        """Obtiene o crea un objeto."""
+        objeto_id = objeto_data.get('objetos_id')
+        nombre_objeto = objeto_data.get('nombre_objeto')
+        
+        if objeto_id:
+            return Objetos.objects.get(Objetos_Id=objeto_id)
+        
+        if nombre_objeto:
+            objeto, created = Objetos.objects.get_or_create(
+                Nombre_Objetos=nombre_objeto,
+                defaults={
+                    'Objetos_Id': get_next_id(Objetos, 'Objetos_Id'),
+                    'Descripcion_Objetos': objeto_data.get('descripcion_objeto', ''),
+                    'Cant_Stock': objeto_data.get('Cantidad_Objetos', 0)
+                }
+            )
+            return objeto
+        
+        return None
+
     @transaction.atomic
     def create(self, validated_data):
         objetos_data = validated_data.pop('objetos_solicitados', [])
-        tipo_servicio_id = validated_data.pop('tipo_servicio_id')
         
+        # Obtener o crear relaciones
+        tipo_servicio = self._get_or_create_tipo_servicio(validated_data)
+        estado = self._get_or_create_estado(validated_data)
+        laboratorio = self._get_or_create_laboratorio(validated_data)
+        horario = self._get_or_create_horario(validated_data)
+        
+        # Usuario
         user_id = validated_data.pop('usuario_id', None)
-        if not user_id and self.context['request'].user.is_authenticated:
+        if not user_id and self.context.get('request') and self.context['request'].user.is_authenticated:
             try:
                 user_id = self.context['request'].user.perfil_oracle.Usuario_Id
             except AttributeError:
                 pass
-            
-        laboratorio_obj = validated_data.pop('Laboratorio_Id', None)
-        horario_obj = validated_data.pop('Horario_Id', None)
-        
-        validated_data.pop('Estado_Id', None)
 
         try:
-            # 1. Obtener ID de SOLICITUDES usando la secuencia de Oracle
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT C##_ACCESLAB_USER.SOLICITUDES_SEQ.NEXTVAL FROM DUAL") 
-                solicitud_id = cursor.fetchone()[0]
+            # Generar ID para la solicitud
+            solicitud_id = get_next_id(Solicitudes, 'Solicitud_Id')
 
-            # 2. Crear la Solicitud Principal
+            # Crear la Solicitud Principal
             solicitud = Solicitudes.objects.create(
                 Solicitud_Id=solicitud_id, 
                 Usuario_Id_id=user_id, 
-                Tipo_Servicio_Id_id=tipo_servicio_id, 
+                Tipo_Servicio_Id=tipo_servicio, 
                 Fecha_solicitud=timezone.localdate(), 
                 
                 Asignatura=validated_data.get('Asignatura'),
@@ -225,52 +372,74 @@ class SolicitudesWriteSerializer(serializers.ModelSerializer):
                 Hora_Fin=validated_data.get('Hora_Fin'),
                 Observaciones_Solicitud=validated_data.get('Observaciones_Solicitud'),
                 
-                Entrega_Id=None, 
-                Devolucion_Id=None,
-                Estado_Id_id=1, # SIEMPRE INICIA EN PENDIENTE (ID 1)
-                
-                Laboratorio_Id=laboratorio_obj, 
-                Horario_Id=horario_obj,
+                Estado_Id=estado,
+                Laboratorio_Id=laboratorio, 
+                Horario_Id=horario,
             )
 
-            # 3. Procesar el Detalle de Objetos y Descontar Inventario
+            # Procesar objetos
             if objetos_data:
                 for detalle_data in objetos_data:
-                    objeto_id = detalle_data.pop('objetos_id')
                     cantidad = detalle_data.get('Cantidad_Objetos')
                     
-                    # Obtener ID de SOLICITUDES_OBJETOS
-                    with connection.cursor() as cursor:
-                        cursor.execute("SELECT C##_ACCESLAB_USER.SOLICITUDES_OBJETOS_SEQ.NEXTVAL FROM DUAL") 
-                        solicitud_objetos_id = cursor.fetchone()[0]
+                    # Obtener o crear objeto
+                    objeto = self._get_or_create_objeto(detalle_data)
                     
-                    # Crear el Detalle
-                    Solicitudes_Objetos.objects.create(
-                        Solicitud_Objetos_Id=solicitud_objetos_id,
-                        Solicitud_Id=solicitud,
-                        Objetos_Id_id=objeto_id, 
-                        Cantidad_Objetos=cantidad,
-                    )
+                    if objeto:
+                        # Generar ID para solicitud_objetos
+                        solicitud_objetos_id = get_next_id(Solicitudes_Objetos, 'Solicitud_Objetos_Id')
+                        
+                        # Crear el Detalle
+                        Solicitudes_Objetos.objects.create(
+                            Solicitud_Objetos_Id=solicitud_objetos_id,
+                            Solicitud_Id=solicitud,
+                            Objetos_Id=objeto, 
+                            Cantidad_Objetos=cantidad,
+                        )
 
-                    # 4. ACTUALIZAR/DESCONTAR INVENTARIO (Operación Atómica)
-                    Objetos.objects.filter(Objetos_Id=objeto_id).update(
-                        Cant_Stock=models.F('Cant_Stock') - cantidad 
-                    )
+                        # Actualizar inventario si el objeto existía
+                        if detalle_data.get('objetos_id'):
+                            Objetos.objects.filter(Objetos_Id=objeto.Objetos_Id).update(
+                                Cant_Stock=models.F('Cant_Stock') - cantidad 
+                            )
                 
             return solicitud
         except Exception as e:
-            raise serializers.ValidationError({"detail": f"Error transaccional al guardar la solicitud: {e}"})
+            raise serializers.ValidationError({"detail": f"Error al guardar la solicitud: {str(e)}"})
 
-    # --- MÉTODO UPDATE (Para PATCH de Estado, Laboratorio, Horario) ---
     def update(self, instance, validated_data):
+        """Actualización flexible de solicitudes."""
         validated_data.pop('objetos_solicitados', None)
-        validated_data.pop('tipo_servicio_id', None)
-        validated_data.pop('usuario_id', None)
         
-        return super().update(instance, validated_data)
+        # Manejar relaciones si se proporcionan
+        if 'tipo_servicio_id' in validated_data or 'tipo_servicio_nombre' in validated_data:
+            tipo_servicio = self._get_or_create_tipo_servicio(validated_data)
+            instance.Tipo_Servicio_Id = tipo_servicio
+        
+        if 'estado_id' in validated_data or 'estado_nombre' in validated_data:
+            estado = self._get_or_create_estado(validated_data)
+            instance.Estado_Id = estado
+        
+        if 'laboratorio_id' in validated_data or 'laboratorio_nombre' in validated_data:
+            laboratorio = self._get_or_create_laboratorio(validated_data)
+            instance.Laboratorio_Id = laboratorio
+        
+        if 'horario_id' in validated_data:
+            horario = self._get_or_create_horario(validated_data)
+            instance.Horario_Id = horario
+        
+        # Actualizar campos restantes
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 
-# --- 2B. Serializer para la Solicitud Principal (LECTURA) ---
+# ----------------------------------------------------------------------
+# Serializer de Lectura (Sin cambios mayores)
+# ----------------------------------------------------------------------
+
 class SolicitudesReadSerializer(serializers.ModelSerializer):
     nombre_solicitante = serializers.SerializerMethodField()
     tipo_servicio_nombre = serializers.CharField(source='Tipo_Servicio_Id.Nombre_Tipo_Servicio', read_only=True)
@@ -284,10 +453,7 @@ class SolicitudesReadSerializer(serializers.ModelSerializer):
         read_only=True
     )
     
-    # Programas del Solicitante
     programas_solicitante = serializers.SerializerMethodField()
-    
-    # INTEGRANTES: Integrantes Asociados (Participantes)
     integrantes_asociados = serializers.SerializerMethodField() 
     
     class Meta:
@@ -297,11 +463,9 @@ class SolicitudesReadSerializer(serializers.ModelSerializer):
             'Usuario_Id', 'Tipo_Servicio_Id', 
             'Fecha_Inicio', 'Fecha_Fin', 'Hora_Inicio', 'Hora_Fin', 
             'Observaciones_Solicitud',
-            # Campos de relación (lectura)
             'nombre_solicitante', 'tipo_servicio_nombre', 'estado_nombre', 
             'laboratorio_nombre', 'horario_inicio',
             'objetos_solicitados_detalle',
-            # Nuevos campos
             'programas_solicitante', 
             'integrantes_asociados'
         )
@@ -312,23 +476,16 @@ class SolicitudesReadSerializer(serializers.ModelSerializer):
         return f"{obj.Usuario_Id.Nombres} {obj.Usuario_Id.Apellido1}"
 
     def get_horario_inicio(self, obj):
-        """Retorna el __str__ del horario si existe, o None."""
         if obj.Horario_Id:
             return str(obj.Horario_Id)
         return None 
     
     def get_programas_solicitante(self, obj):
-        """
-        Obtiene los Programas Académicos asociados al usuario principal de la solicitud 
-        navegando a través de la tabla USUARIOS_PROGRAMAS.
-        """
         if not obj.Usuario_Id:
             return []
         
-        # Filtra la tabla de asociación Usuarios_Programas por el Usuario_Id
         programas_asociados = Usuarios_Programas.objects.filter(Usuario_Id=obj.Usuario_Id)
         
-        # Retorna el ID y el nombre del programa
         return [
             {
                 "programa_id": p.Programa_Id_id, 
@@ -338,30 +495,23 @@ class SolicitudesReadSerializer(serializers.ModelSerializer):
         ]
         
     def get_integrantes_asociados(self, obj):
-        """
-        Obtiene los Integrantes asociados a la solicitud usando el IntegranteSolicitudSerializer.
-        """
-        # Filtra la tabla de asociación Integrante_Solicitud por la Solicitud_Id
         integrantes = Integrante_Solicitud.objects.filter(Solicitud_Id=obj)
-        # Se usa el serializer simple para el detalle
         return IntegranteSolicitudSimpleSerializer(integrantes, many=True).data
 
 
 # ----------------------------------------------------------------------
-# 3. Serializer para INTEGRANTE_SOLICITUD (Relación N:M)
+# 3. Serializers de Integrantes (Sin cambios mayores)
 # ----------------------------------------------------------------------
 
-# SERIALIZER SIMPLE PARA LECTURA ANIDADA (SOLICITUDES_READ)
 class IntegranteSolicitudSimpleSerializer(serializers.ModelSerializer):
     nombre_usuario = serializers.CharField(source='Usuario_Id.Nombres', read_only=True)
     apellido_usuario = serializers.CharField(source='Usuario_Id.Apellido1', read_only=True)
     
     class Meta:
-        # Usamos el modelo Integrante_Solicitud
         model = Integrante_Solicitud
         fields = ('Usuario_Id_id', 'nombre_usuario', 'apellido_usuario')
 
-# SERIALIZER COMPLETO PARA ESCRITURA (POST/DELETE del endpoint de Integrantes)
+
 class IntegranteSolicitudSerializer(serializers.ModelSerializer):
     usuario_id = serializers.IntegerField(write_only=True)
     solicitud_id = serializers.IntegerField(write_only=True)
@@ -370,7 +520,6 @@ class IntegranteSolicitudSerializer(serializers.ModelSerializer):
     apellido_usuario = serializers.CharField(source='Usuario_Id.Apellido1', read_only=True)
 
     class Meta:
-        # Usamos el modelo Integrante_Solicitud
         model = Integrante_Solicitud
         fields = (
             'Usuario_Solicitud_Id', 'usuario_id', 'solicitud_id', 
@@ -383,14 +532,22 @@ class IntegranteSolicitudSerializer(serializers.ModelSerializer):
         solicitud_id = data.get('solicitud_id')
 
         if not Usuarios.objects.filter(Usuario_Id=usuario_id).exists():
-            raise serializers.ValidationError({"usuario_id": "El Usuario_Id proporcionado no existe."})
+            raise serializers.ValidationError({
+                "usuario_id": "El Usuario_Id proporcionado no existe."
+            })
 
         if not Solicitudes.objects.filter(Solicitud_Id=solicitud_id).exists():
-            raise serializers.ValidationError({"solicitud_id": "La Solicitud_Id proporcionada no existe."})
+            raise serializers.ValidationError({
+                "solicitud_id": "La Solicitud_Id proporcionada no existe."
+            })
 
-        # Validamos contra Integrante_Solicitud
-        if Integrante_Solicitud.objects.filter(Usuario_Id_id=usuario_id, Solicitud_Id_id=solicitud_id).exists():
-            raise serializers.ValidationError("Este usuario ya está asociado a esta solicitud como integrante.")
+        if Integrante_Solicitud.objects.filter(
+            Usuario_Id_id=usuario_id, 
+            Solicitud_Id_id=solicitud_id
+        ).exists():
+            raise serializers.ValidationError(
+                "Este usuario ya está asociado a esta solicitud como integrante."
+            )
 
         return data
 
@@ -399,14 +556,9 @@ class IntegranteSolicitudSerializer(serializers.ModelSerializer):
         usuario_id = validated_data.pop('usuario_id')
         solicitud_id = validated_data.pop('solicitud_id')
         
-        SEQUENCE_NAME = 'C##_ACCESLAB_USER.USUARIO_SOLICITUD_SEQ' 
-        
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(f"SELECT {SEQUENCE_NAME}.NEXTVAL FROM DUAL") 
-                integrante_solicitud_id = cursor.fetchone()[0]
+            integrante_solicitud_id = get_next_id(Integrante_Solicitud, 'Usuario_Solicitud_Id')
 
-            # Creamos la instancia en Integrante_Solicitud
             integrante_solicitud = Integrante_Solicitud.objects.create(
                 Usuario_Solicitud_Id=integrante_solicitud_id,
                 Usuario_Id_id=usuario_id,
@@ -414,4 +566,6 @@ class IntegranteSolicitudSerializer(serializers.ModelSerializer):
             )
             return integrante_solicitud
         except Exception as e:
-            raise serializers.ValidationError({"error": f"Error al guardar la relación de integrante: {e}"})
+            raise serializers.ValidationError({
+                "error": f"Error al guardar la relación de integrante: {str(e)}"
+            })

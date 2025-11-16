@@ -1,14 +1,15 @@
-# maestros/views.py
+# ==============================================================================
+# MAESTROS/VIEWS.PY - Optimizado y Simplificado
+# ==============================================================================
 
 from rest_framework import viewsets, permissions
-# Asume que tienes la clase IsAdminUser en la aplicación usuarios/permissions.py
 from usuarios.permissions import IsAdminUser 
 
 from .models import (
     Roles, Frecuencia_Servicio, Entregas, Devoluciones, 
     Tipo_Servicio, Laboratorios, Tipo_Identificacion, 
     Tipo_Solicitantes, Facultades, Programas, 
-    Categorias, Objetos, Estados, Horarios_Laboratorio # CORREGIDO: Usar Horarios_Laboratorio
+    Categorias, Objetos, Estados, Horarios_Laboratorio
 )
 from .serializers import (
     RolesSerializer, FrecuenciaServicioSerializer, EntregasSerializer, DevolucionesSerializer,
@@ -17,88 +18,117 @@ from .serializers import (
     CategoriaSerializer, ObjetoSerializer, EstadoSerializer, HorariosLaboratorioSerializer
 )
 
-# Permiso base: Solo usuarios autenticados Y que sean administradores
+
+# Permiso base para todos los ViewSets de Maestros
 ADMIN_PERMISSION = [permissions.IsAuthenticated, IsAdminUser]
 
+
+# Clase base para reducir código repetitivo
+class BaseAdminViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet base con permisos de Admin.
+    ✅ Compatible con serializers flexibles (auto-generación de IDs).
+    """
+    permission_classes = ADMIN_PERMISSION
+
+
 # ----------------------------------------------------------------------
-# VISTAS DE CATÁLOGOS BASE (Maestros)
+# CATÁLOGOS SIMPLES
 # ----------------------------------------------------------------------
 
-class RolesViewSet(viewsets.ModelViewSet):
+class RolesViewSet(BaseAdminViewSet):
     queryset = Roles.objects.all().order_by('Nombre_Roles')
     serializer_class = RolesSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class TipoIdentificacionViewSet(viewsets.ModelViewSet):
+
+class TipoIdentificacionViewSet(BaseAdminViewSet):
     queryset = Tipo_Identificacion.objects.all().order_by('Nombre_Tipo_Identificacion')
     serializer_class = TipoIdentificacionSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class TipoSolicitantesViewSet(viewsets.ModelViewSet):
+
+class TipoSolicitantesViewSet(BaseAdminViewSet):
     queryset = Tipo_Solicitantes.objects.all().order_by('Nombre_Solicitante')
     serializer_class = TipoSolicitanteSerializer
-    permission_classes = ADMIN_PERMISSION
-    
-class FacultadesViewSet(viewsets.ModelViewSet):
+
+
+class FacultadesViewSet(BaseAdminViewSet):
     queryset = Facultades.objects.all().order_by('Nombre_Facultad')
     serializer_class = FacultadSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class CategoriasViewSet(viewsets.ModelViewSet):
+
+class CategoriasViewSet(BaseAdminViewSet):
     queryset = Categorias.objects.all().order_by('Nombre_Categoria')
     serializer_class = CategoriaSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class TipoServicioViewSet(viewsets.ModelViewSet):
+
+class TipoServicioViewSet(BaseAdminViewSet):
     queryset = Tipo_Servicio.objects.all().order_by('Nombre_Tipo_Servicio')
     serializer_class = TipoServicioSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class FrecuenciaServicioViewSet(viewsets.ModelViewSet):
+
+class FrecuenciaServicioViewSet(BaseAdminViewSet):
     queryset = Frecuencia_Servicio.objects.all().order_by('Nombre_Frecuencia_Servicio')
     serializer_class = FrecuenciaServicioSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class LaboratoriosViewSet(viewsets.ModelViewSet):
+
+class LaboratoriosViewSet(BaseAdminViewSet):
     queryset = Laboratorios.objects.all().order_by('Nombre_Laboratorio')
     serializer_class = LaboratoriosSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class HorariosLaboratorioViewSet(viewsets.ModelViewSet):
-    # OPTIMIZACIÓN: Añadir select_related para obtener el nombre del laboratorio
-    queryset = Horarios_Laboratorio.objects.all().select_related('Laboratorio_Id').order_by('Horario_Id')
-    serializer_class = HorariosLaboratorioSerializer
-    permission_classes = ADMIN_PERMISSION
-    
-class EstadosViewSet(viewsets.ModelViewSet):
+
+class EstadosViewSet(BaseAdminViewSet):
     queryset = Estados.objects.all().order_by('Estado_Id')
     serializer_class = EstadoSerializer
-    permission_classes = ADMIN_PERMISSION
+
 
 # ----------------------------------------------------------------------
-# VISTAS CON CLAVES FORÁNEAS
+# CATÁLOGOS CON RELACIONES FK
 # ----------------------------------------------------------------------
 
-class ProgramasViewSet(viewsets.ModelViewSet):
+class ProgramasViewSet(BaseAdminViewSet):
+    """
+    ✅ Compatible con creación flexible:
+    - Puede crear programa con facultad_id existente
+    - Puede crear programa + facultad nueva con facultad_nombre
+    """
     queryset = Programas.objects.all().select_related('Facultad_Id').order_by('Nombre_Programa')
     serializer_class = ProgramaSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class ObjetosViewSet(viewsets.ModelViewSet):
+
+class ObjetosViewSet(BaseAdminViewSet):
+    """
+    ✅ Compatible con creación flexible:
+    - Puede crear objeto con categoria_id existente
+    - Puede crear objeto + categoría nueva con categoria_nombre
+    """
     queryset = Objetos.objects.all().select_related('Categoria_Id').order_by('Nombre_Objetos')
     serializer_class = ObjetoSerializer
-    permission_classes = ADMIN_PERMISSION
+
+
+class HorariosLaboratorioViewSet(BaseAdminViewSet):
+    """
+    ✅ Compatible con creación flexible:
+    - Puede crear horario con laboratorio_id existente
+    - Puede crear horario + laboratorio nuevo con laboratorio_nombre
+    """
+    queryset = Horarios_Laboratorio.objects.all().select_related('Laboratorio_Id').order_by('Horario_Id')
+    serializer_class = HorariosLaboratorioSerializer
+
 
 # ----------------------------------------------------------------------
-# VISTAS DE TABLAS TRANSACCIONALES
+# TABLAS TRANSACCIONALES
 # ----------------------------------------------------------------------
 
-class EntregasViewSet(viewsets.ModelViewSet):
-    queryset = Entregas.objects.all().select_related('Frecuencia_Servicio_Id').order_by('Entrega_Id')
+class EntregasViewSet(BaseAdminViewSet):
+    """
+    ✅ Compatible con creación flexible:
+    - Puede crear entrega con frecuencia_id existente
+    - Puede crear entrega + frecuencia nueva con frecuencia_nombre
+    """
+    queryset = Entregas.objects.all().select_related('Frecuencia_Servicio_Id').order_by('-Entrega_Id')
     serializer_class = EntregasSerializer
-    permission_classes = ADMIN_PERMISSION
 
-class DevolucionesViewSet(viewsets.ModelViewSet):
-    queryset = Devoluciones.objects.all().order_by('Devolucion_Id')
+
+class DevolucionesViewSet(BaseAdminViewSet):
+    queryset = Devoluciones.objects.all().order_by('-Devolucion_Id')
     serializer_class = DevolucionesSerializer
-    permission_classes = ADMIN_PERMISSION

@@ -183,3 +183,5 @@ class Integrante_Solicitud(models.Model):
         unique_together = (('Usuario_Id', 'Solicitud_Id'),)
         managed = False
         verbose_name_plural = "Integrantes de Solicitud"
+
+    

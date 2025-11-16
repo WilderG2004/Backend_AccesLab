@@ -1,6 +1,7 @@
 # usuarios/permissions.py
 
 from rest_framework.permissions import BasePermission
+from rest_framework import permissions
 from .models import Usuarios_Roles 
 import logging
 logger = logging.getLogger(__name__)
@@ -9,33 +10,32 @@ logger = logging.getLogger(__name__)
 # El ID del Rol de Administrador se ASUME como 1 en la base de datos de Oracle
 ADMIN_ROL_ID = 1
 
-class IsAdminUser(BasePermission):
+class IsAdminUser(permissions.BasePermission):
     """
-    Permiso que comprueba si el usuario autenticado tiene el ROL_ID=1 (ADMIN) en la 
-    tabla USUARIOS_ROLES de Oracle.
+    Permite GET/HEAD/OPTIONS a cualquier usuario autenticado.
+    Para métodos que modifican (POST/PUT/PATCH/DELETE) requiere que el usuario tenga rol admin
+    (existencia de registro en Usuarios_Roles con Rol_Id=ADMIN_ROL_ID).
     """
     message = "Requiere el rol de Administrador (ROL_ID=1) para acceder."
     
     def has_permission(self, request, view):
+        # Permitir métodos seguros a cualquier usuario autenticado
+        if request.method in permissions.SAFE_METHODS:
+            return bool(request.user and request.user.is_authenticated)
+
         if not request.user or not request.user.is_authenticated:
-            # Si no está autenticado, no tiene permisos
             logger.info("❌ PERMISOS: Usuario no autenticado (AnonymousUser).")
             return False
-            
+
+        user_pk = getattr(request.user, 'pk', None)
         try:
-            user_pk = request.user.pk
-            
-            # Consulta a Oracle: Verificar existencia del par (Usuario_Id, Rol_Id=1)
-            # El lookup es: CampoFK_en_Usuarios_Roles__Campo_en_Modelo_Usuario__Campo_en_User
+            # Consulta a Oracle: Verificar existencia del par (Usuario_Id, Rol_Id=ADMIN_ROL_ID)
             es_admin = Usuarios_Roles.objects.filter(
-                # Usamos la FK implícita del OneToOneField a la tabla Usuarios
-                Usuario_Id__Usuario_Id=user_pk,  
-                # Usamos la FK al modelo Roles y el campo ROL_ID (asumido como 1)
-                Rol_Id__Rol_Id=ADMIN_ROL_ID 
+                Usuario_Id__Usuario_Id=user_pk,
+                Rol_Id__Rol_Id=ADMIN_ROL_ID
             ).exists()
             
             logger.info(f"✅ ROL CHECK (IsAdminUser): Usuario PK={user_pk}. ¿Es ADMIN? {es_admin}")
-
             return es_admin
             
         except Exception as e:
@@ -54,8 +54,7 @@ class IsSelfOrAdmin(BasePermission):
         if IsAdminUser().has_permission(request, view):
             return True
             
-        # 2. Verificar si es su propio objeto
-        # 'obj' es una instancia del modelo 'User' (en el caso de UsuarioAdminViewSet/MeView)
+        # 2. Verificar si es su propio objeto (obj es instancia de User)
         is_self = obj.pk == request.user.pk
         
         logger.info(f"✅ PERMISOS (IsSelfOrAdmin): Usuario PK={request.user.pk}. ¿Es DUEÑO? {is_self}")
